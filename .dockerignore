@@ -1,0 +1,47 @@
+# .dockerignore — root (used by Dockerfile.backend context)
+# Exclude everything that shouldn't be in the backend image
+
+# Python junk
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+
+# Virtual environment — prod image installs from requirements.txt directly
+backend/.venv/
+.venv/
+
+# Secrets — NEVER bake into image; injected via env_file at runtime
+.env
+
+# Frontend build artifacts (not needed by backend)
+frontend/node_modules/
+frontend/dist/
+frontend/.next/
+
+# Dev / IDE
+.git/
+.gitignore
+**/.DS_Store
+**/Thumbs.db
+**/*.log
+
+# Data dirs — mounted as Docker volumes, not baked in
+data/uploads/*
+data/keyframes/*
+data/faiss_index/*
+
+# C++ build artifacts (we run the build inside the image)
+cpp_bindings/build/
+cpp_bindings/build_cmake/
+cpp_bindings/*.egg-info/
+
+# Test files (not needed in prod image)
+backend/tests/
+tests/
+
+# Docs / agent files (trim image size)
+*.md
+oppa.txt

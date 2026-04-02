@@ -1,0 +1,30 @@
+fastapi==0.115.0
+uvicorn[standard]==0.29.0
+python-multipart==0.0.9
+aiofiles==23.2.1
+httpx==0.27.0
+pydantic-settings==2.3.4
+
+# Task queue
+celery==5.3.6
+redis==5.0.4
+
+# Video / image processing
+opencv-python-headless==4.9.0.80
+scikit-image==0.24.0
+Pillow==10.4.0
+numpy==1.26.4
+
+# AI / ML
+openai==1.35.0
+faiss-cpu==1.8.0
+
+# Audio
+deepgram-sdk==3.4.0
+
+# Logging
+structlog==24.2.0
+
+# Testing
+pytest==8.2.2
+pytest-asyncio==0.23.8

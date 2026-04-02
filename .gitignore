@@ -1,0 +1,27 @@
+.venv/
+.env
+__pycache__/
+*.pyc
+*.pyo
+data/uploads/*
+data/keyframes/*
+data/faiss_index/*
+!data/**/.gitkeep
+node_modules/
+.next/
+.vercel/
+*.log
+.DS_Store
+Thumbs.db
+dist/
+build/
+
+# Docker
+docker-compose.override.yml
+cpp_bindings/build/
+cpp_bindings/build_cmake/
+cpp_bindings/*.egg-info/
+cpp_bindings/ssim_cpp*.so
+cpp_bindings/ssim_cpp*.pyd
+backend/services/ssim_cpp*.so
+backend/services/ssim_cpp*.pyd

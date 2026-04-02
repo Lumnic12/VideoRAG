@@ -1,0 +1,21 @@
+# frontend/.dockerignore — used by frontend/Dockerfile build context
+# Only the files needed for `npm ci && npm run build` should enter the image
+
+node_modules/
+dist/
+.next/
+.nuxt/
+
+# Dev / IDE
+.DS_Store
+*.log
+.env
+.env.local
+.env.*.local
+
+# Type check cache
+tsconfig.tsbuildinfo
+
+# Sources not needed at build time
+public/videos/
+README.md
