@@ -120,8 +120,7 @@ def _run_pipeline(job_id: str, video_path: str) -> dict:
         # ── Step 4: LLM transcript structuring ────────────────────────────────
         # Converts raw choppy speech → topic sections with summaries & key terms
         # so the RAG has dense, concept-rich text to embed instead of fragments.
-        update_job(job_id, "processing", 72,
-                   data={"stage": "Structuring transcript with LLM..."})
+        update_job(job_id, "processing", 72)
         logger.info("pipeline_step4_structure", job_id=job_id,
                     segments=len(transcript))
 
@@ -168,10 +167,14 @@ def _run_pipeline(job_id: str, video_path: str) -> dict:
             ],
         }
 
-        # Save transcript to disk for later re-indexing
+        # Save transcript and structured transcript to disk for later re-indexing
         transcript_path = Path(job_kf_dir) / "transcript.json"
         with open(transcript_path, "w", encoding="utf-8") as f:
             json.dump(result["transcript"], f, indent=2)
+
+        structured_path = Path(job_kf_dir) / "structured_transcript.json"
+        with open(structured_path, "w", encoding="utf-8") as f:
+            json.dump(result["structured_transcript"], f, indent=2)
 
         update_job(job_id, "processing", 90)
 

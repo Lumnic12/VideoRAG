@@ -432,7 +432,18 @@ async def reindex_video(job_id: str) -> JSONResponse:
         with open(transcript_path, "r", encoding="utf-8") as f:
             transcript_data = json.load(f)
 
-    result = {"keyframes": keyframes_data, "transcript": transcript_data}
+    # Load structured transcript if available
+    structured_data = []
+    structured_path = kf_dir / "structured_transcript.json"
+    if structured_path.exists():
+        with open(structured_path, "r", encoding="utf-8") as f:
+            structured_data = json.load(f)
+
+    result = {
+        "keyframes": keyframes_data,
+        "transcript": transcript_data,
+        "structured_transcript": structured_data,
+    }
     await rag_service.index_content(job_id, result)
 
     return JSONResponse({
@@ -440,38 +451,11 @@ async def reindex_video(job_id: str) -> JSONResponse:
         "job_id": job_id,
         "keyframes": len(keyframes_data),
         "transcript_segments": len(transcript_data),
+        "structured_sections": len(structured_data),
     })
 
-@router.delete("/{job_id}", tags=["video"])
-async def delete_video_route(job_id: str) -> JSONResponse:
-    """
-    Delete a video and all its associated artifacts (keyframes, audio, transcript, vector embeddings, redis state).
-    """
-    from services.rag_service import rag_service
-    import shutil
-    import redis
-
-    # 1. Clean up Redis state
-    r = redis.from_url(settings.redis_url)
-    r.delete(f"job:{job_id}")
-
-    # 2. Clean up keyframe directory
-    kf_dir = Path(settings.keyframe_dir) / job_id
-    if kf_dir.exists():
-        shutil.rmtree(kf_dir, ignore_errors=True)
-
-    # 3. Clean up original video
-    # We have to guess the extension, so let's check the upload dir
-    upload_dir = Path(settings.upload_dir)
-    for ext in ['.mp4', '.mov', '.avi', '.mkv', '.webm']:
-        video_path = upload_dir / f"{job_id}{ext}"
-        if video_path.exists():
-            try:
-                video_path.unlink()
-            except:
-                pass
-
-    return JSONResponse({"status": "deleted", "job_id": job_id})
+# NOTE: The bare DELETE /{job_id} route was removed — it conflicted with other
+# routes and duplicated DELETE /videos/{job_id} above (which also cleans FAISS).
 
 
 

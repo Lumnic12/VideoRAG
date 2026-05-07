@@ -46,7 +46,7 @@ class JobStatusResponse(BaseModel):
     task_id: str
     status: str          # queued | processing | done | failed
     progress: int
-    result: JobResultData | None = None
+    result: Any = None   # dict with keyframes, transcript, structured_transcript
     error: str | None = None
     keyframe_count: int | None = None
 

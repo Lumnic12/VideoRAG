@@ -95,13 +95,15 @@ def _progress_to_step(progress: int) -> str:
     if progress < 10:
         return "Queued — waiting for worker..."
     if progress < 30:
-        return "Step 1/5 — Extracting keyframes via SSIM..."
+        return "Step 1/6 — Extracting keyframes via SSIM..."
     if progress < 40:
-        return "Step 2/5 — Extracting audio track..."
-    if progress < 80:
-        return "Step 3/5 — Analyzing keyframes with VLM + transcribing..."
+        return "Step 2/6 — Extracting audio track..."
+    if progress < 70:
+        return "Step 3/6 — Analysing keyframes (OCR/VLM) + transcribing audio..."
+    if progress < 85:
+        return "Step 4/6 — Structuring transcript with LLM..."
     if progress < 90:
-        return "Step 4/5 — Building result payload..."
+        return "Step 5/6 — Building result payload..."
     if progress < 100:
-        return "Step 5/5 — Indexing into FAISS RAG store..."
+        return "Step 6/6 — Indexing into FAISS RAG store..."
     return "Done!"

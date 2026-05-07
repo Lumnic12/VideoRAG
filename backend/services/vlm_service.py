@@ -134,7 +134,7 @@ Return ONLY JSON."""
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
             resp = await client.post(f"{base}/api/chat", json={
-                "model": "gemma3:1b",
+                "model": settings.ollama_model,  # respects OLLAMA_MODEL env var
                 "messages": [{"role": "user", "content": prompt}],
                 "stream": False,
                 "options": {"temperature": 0.1, "num_predict": 200},

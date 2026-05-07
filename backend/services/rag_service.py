@@ -164,9 +164,14 @@ class RAGService:
         idx_dir.mkdir(parents=True, exist_ok=True)
         if _FAISS_OK and self._index is not None:
             _faiss.write_index(self._index, str(idx_dir / "index.faiss"))
+        # Strip raw numpy vectors before pickling — they live in the FAISS index
+        meta_clean = {
+            k: {kk: vv for kk, vv in v.items() if kk != "vector"}
+            for k, v in self._metadata.items()
+        }
         with open(idx_dir / "metadata.pkl", "wb") as f:
             pickle.dump({
-                "meta": self._metadata,
+                "meta": meta_clean,
                 "counter": self._counter,
                 "embed_dim": self._get_embed_dim(),
             }, f)
