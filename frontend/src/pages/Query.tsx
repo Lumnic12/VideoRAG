@@ -1,5 +1,5 @@
 import { useState, type KeyboardEvent, useRef, useEffect } from 'react'
-import { queryVideo, type QueryResult } from '../lib/api'
+import { queryVideo, listVideos, type QueryResult, type VideoListItem } from '../lib/api'
 
 interface Message {
   id: string
@@ -100,11 +100,22 @@ export function Query() {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
+  const [videos, setVideos] = useState<VideoListItem[]>([])
+  const [selectedVideoId, setSelectedVideoId] = useState<string>('') // '' = all videos
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
+
+  // Load videos and auto-select most recent
+  useEffect(() => {
+    listVideos().then(list => {
+      setVideos(list)
+      const done = list.filter(v => v.status === 'done')
+      if (done.length > 0) setSelectedVideoId(done[done.length - 1].job_id)
+    }).catch(() => {})
+  }, [])
 
   const send = async (question?: string) => {
     const q = question ?? input.trim()
@@ -123,6 +134,7 @@ export function Query() {
     try {
       const res = await queryVideo({
         question: q,
+        video_ids: selectedVideoId ? [selectedVideoId] : undefined,
         chat_history: history.length > 0 ? history : undefined,
       })
       const assistantMsg: Message = {
@@ -154,11 +166,39 @@ export function Query() {
 
   return (
     <div className="page-content animate-fadein" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div className="page-header" style={{ marginBottom: '1.5rem' }}>
+      <div className="page-header" style={{ marginBottom: '1rem' }}>
         <h1 className="page-title">Ask VideoRAG</h1>
         <p className="page-subtitle">
           Query your indexed videos using natural language — powered by FAISS retrieval + local Ollama LLM.
         </p>
+        {/* Video selector */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, flexWrap: 'wrap' }}>
+          <label style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600 }}>Searching:</label>
+          <select
+            value={selectedVideoId}
+            onChange={e => { setSelectedVideoId(e.target.value); setMessages([]) }}
+            style={{
+              background: 'rgba(255,255,255,0.04)',
+              border: '1px solid rgba(0,240,255,0.25)',
+              borderRadius: 8,
+              color: 'var(--text-pure)',
+              fontSize: 12,
+              padding: '5px 12px',
+              cursor: 'pointer',
+              maxWidth: 320,
+            }}
+          >
+            <option value=''>🌐 All Videos (Global Search)</option>
+            {videos.filter(v => v.status === 'done').map(v => (
+              <option key={v.job_id} value={v.job_id}>
+                🎬 {v.filename.length > 40 ? v.filename.slice(0, 40) + '…' : v.filename}
+              </option>
+            ))}
+          </select>
+          {selectedVideoId && (
+            <span style={{ fontSize: 11, color: 'rgba(0,240,255,0.7)' }}>✓ Scoped to 1 video</span>
+          )}
+        </div>
       </div>
 
       {/* Seed questions */}

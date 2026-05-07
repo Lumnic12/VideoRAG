@@ -207,10 +207,24 @@ export function Chat() {
   }, [])
 
   useEffect(() => {
-    fetchVideos()
+    const init = async () => {
+      await fetchVideos()
+    }
+    init()
     const id = setInterval(fetchVideos, 15000)
     return () => clearInterval(id)
   }, [fetchVideos])
+
+  // Auto-select the most recent done video on first load
+  useEffect(() => {
+    if (activeVideoIds.length === 0 && videos.length > 0) {
+      const doneVideos = videos.filter(v => v.status === 'done')
+      if (doneVideos.length > 0) {
+        // Pick the last one (most recently added)
+        setActiveVideoIds([doneVideos[doneVideos.length - 1].job_id])
+      }
+    }
+  }, [videos])
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
