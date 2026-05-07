@@ -68,14 +68,17 @@ def _run_pipeline(job_id: str, video_path: str) -> dict:
 
     Steps:
       1. SSIM keyframe extraction         → 10→30 %
-      2. Extract audio via ffmpeg          → 30→40 %
-      3. VLM + transcription in parallel   → 40→80 %
-      4. Build result dict                 → 80→90 %
-      5. Index into FAISS RAG              → 90→100 %
+      2. Extract audio via ffmpeg          → 30→35 %
+      3. VLM + transcription in parallel   → 35→70 %
+      4. LLM transcript structuring        → 70→85 %
+         (Ollama converts raw speech → topic sections + summaries)
+      5. Build result dict                 → 85→90 %
+      6. Index into FAISS RAG              → 90→100 %
     """
     from services.frame_extractor import extract_keyframes, save_keyframes
     from services.vlm_service import analyze_all_keyframes
     from services.audio_service import extract_audio, transcribe_audio
+    from services.transcript_structurer import structure_transcript
     from services.rag_service import rag_service
 
     try:
@@ -111,8 +114,31 @@ def _run_pipeline(job_id: str, video_path: str) -> dict:
         finally:
             loop.close()
 
-        update_job(job_id, "processing", 80)
+        update_job(job_id, "processing", 70)
         logger.info("pipeline_vlm_done", job_id=job_id, analyses=len(analyses))
+
+        # ── Step 4: LLM transcript structuring ────────────────────────────────
+        # Converts raw choppy speech → topic sections with summaries & key terms
+        # so the RAG has dense, concept-rich text to embed instead of fragments.
+        update_job(job_id, "processing", 72,
+                   data={"stage": "Structuring transcript with LLM..."})
+        logger.info("pipeline_step4_structure", job_id=job_id,
+                    segments=len(transcript))
+
+        raw_segs = [{"start": s.start, "end": s.end, "text": s.text}
+                    for s in transcript]
+
+        loop3 = asyncio.new_event_loop()
+        try:
+            structured_sections = loop3.run_until_complete(
+                structure_transcript(raw_segs)
+            )
+        finally:
+            loop3.close()
+
+        update_job(job_id, "processing", 85)
+        logger.info("pipeline_structure_done", job_id=job_id,
+                    sections=len(structured_sections))
 
         result: dict = {
             "keyframes": [
@@ -127,9 +153,18 @@ def _run_pipeline(job_id: str, video_path: str) -> dict:
                 }
                 for a, p in zip(analyses, image_paths)
             ],
-            "transcript": [
-                {"start": s.start, "end": s.end, "text": s.text}
-                for s in transcript
+            "transcript": raw_segs,
+            # Structured sections — the primary RAG input for spoken content
+            "structured_transcript": [
+                {
+                    "start": sec.start_sec,
+                    "end": sec.end_sec,
+                    "topic": sec.topic,
+                    "summary": sec.summary,
+                    "key_terms": sec.key_terms,
+                    "raw_text": sec.raw_text,
+                }
+                for sec in structured_sections
             ],
         }
 

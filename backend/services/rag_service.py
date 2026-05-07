@@ -320,6 +320,39 @@ class RAGService:
             vectors.append(vec)
             self._counter += 1
 
+        # ── Index structured transcript sections (LLM-synthesised) ────────────
+        # These are the HIGH-QUALITY chunks: topic title + structured summary +
+        # key terms. They give the embedding model rich semantic text instead of
+        # raw choppy speech, dramatically improving retrieval precision.
+        structured = result.get("structured_transcript", [])
+        logger.info("rag_structured_sections", count=len(structured))
+
+        for sec in structured:
+            topic   = (sec.get("topic") or "").strip()
+            summary = (sec.get("summary") or "").strip()
+            terms   = sec.get("key_terms") or []
+            ts      = sec.get("start", 0.0)
+
+            if not (topic or summary):
+                continue
+
+            ts_fmt = f"{int(ts // 60)}:{int(ts % 60):02d}"
+            chunk = f"[Lecture @ {ts_fmt}] Topic: {topic}\nSummary: {summary}"
+            if terms:
+                chunk += "\nKey Terms: " + ", ".join(t for t in terms if t)
+
+            vec = await self._embed(chunk)
+            self._metadata[self._counter] = {
+                "video_id": video_id,
+                "type": "structured_transcript",
+                "timestamp": ts,
+                "text": chunk,
+                "topic": topic,
+                "vector": vec,
+            }
+            vectors.append(vec)
+            self._counter += 1
+
         if vectors:
             mat = np.stack(vectors)
             if _FAISS_OK and idx is not None:
@@ -329,7 +362,8 @@ class RAGService:
 
         logger.info("rag_indexed", video_id=video_id, chunks=len(vectors),
                     keyframes=len(result.get("keyframes", [])),
-                    transcript_segs=len(transcript))
+                    transcript_segs=len(transcript),
+                    structured_sections=len(structured))
 
     async def query_and_answer(
         self,
