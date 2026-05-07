@@ -121,7 +121,7 @@ class RAGService:
     def _get_chat_clients(self) -> list[tuple["AsyncOpenAI", str, str]]:
         """Return configured LLM providers — local Ollama only."""
         clients = []
-        if not _OPENAI_OK:
+        if AsyncOpenAI is None:   # openai package not installed
             return clients
         # Use ONLY local Ollama (user requested no API keys)
         if settings.ollama_base_url:

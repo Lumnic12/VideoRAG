@@ -122,14 +122,9 @@ def _get_whisper_model():
             _whisper_model = WhisperModel("base", device="cpu", compute_type="int8")
             logger.info("whisper_loaded", source="downloaded")
     return _whisper_model
-
-
-# Pre-warm Whisper at import time so first job doesn't stall
-if _WHISPER_OK:
-    try:
-        _get_whisper_model()
-    except Exception as _e:
-        logger.warning("whisper_prewarm_failed", error=str(_e))
+# NOTE: Whisper loads lazily on first transcription call (inside a task thread).
+# Loading at import time crashes Celery on Windows — ctranslate2 native DLL
+# cannot be safely initialised in the Celery main process before threading starts.
 
 
 async def _transcribe_via_whisper(audio_path: str) -> list[TranscriptSegment]:
