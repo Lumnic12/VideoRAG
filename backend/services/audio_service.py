@@ -102,25 +102,34 @@ _whisper_model = None
 
 
 def _get_whisper_model():
-    """Lazy-load Whisper model. Uses local cache only to avoid HuggingFace network check."""
+    """Lazy-load Whisper model. Uses GPU (CUDA) if available, else CPU int8."""
     global _whisper_model
     if _whisper_model is None and _WHISPER_OK:
-        logger.info("whisper_loading", model="base", compute="int8")
+        # Auto-detect CUDA GPU
         try:
-            # local_files_only=True — skip the HuggingFace revision check entirely.
-            # This prevents the worker from crashing when HF is slow/unreachable.
+            import ctranslate2
+            providers = ctranslate2.get_supported_compute_types("cuda")
+            use_cuda = len(providers) > 0
+        except Exception:
+            use_cuda = False
+
+        device = "cuda" if use_cuda else "cpu"
+        compute = "float16" if use_cuda else "int8"
+        logger.info("whisper_loading", model="base", device=device, compute=compute)
+
+        try:
             _whisper_model = WhisperModel(
                 "base",
-                device="cpu",
-                compute_type="int8",
+                device=device,
+                compute_type=compute,
                 local_files_only=True,
             )
-            logger.info("whisper_loaded", source="local_cache")
+            logger.info("whisper_loaded", device=device, source="local_cache")
         except Exception:
-            # First run or cache missing — allow download
-            logger.info("whisper_downloading", msg="Model not cached yet, downloading ~150MB")
+            # Cache miss or CUDA fail — retry with CPU or allow download
+            logger.info("whisper_fallback", reason="local load failed, retrying")
             _whisper_model = WhisperModel("base", device="cpu", compute_type="int8")
-            logger.info("whisper_loaded", source="downloaded")
+            logger.info("whisper_loaded", device="cpu", source="downloaded")
     return _whisper_model
 # NOTE: Whisper loads lazily on first transcription call (inside a task thread).
 # Loading at import time crashes Celery on Windows — ctranslate2 native DLL
