@@ -63,6 +63,9 @@ services:
       # Pipeline tuning
       SSIM_THRESHOLD: ${SSIM_THRESHOLD:-0.95}
       MAX_UPLOAD_SIZE_MB: ${MAX_UPLOAD_SIZE_MB:-500}
+      # Cache dirs — keep HuggingFace model downloads inside the app volume
+      HF_HOME: /app/.cache/huggingface
+      XDG_CACHE_HOME: /app/.cache
     volumes:
       - app_data:/app/data
     depends_on:
@@ -101,6 +104,9 @@ services:
       OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma3:1b}
       OLLAMA_VISION_MODEL: ${OLLAMA_VISION_MODEL:-moondream}
       SSIM_THRESHOLD: ${SSIM_THRESHOLD:-0.95}
+      # Cache dirs — keep HuggingFace model downloads inside the app volume
+      HF_HOME: /app/.cache/huggingface
+      XDG_CACHE_HOME: /app/.cache
     volumes:
       - app_data:/app/data          # shares uploads/keyframes/index with backend
     depends_on:
