@@ -63,20 +63,20 @@ export function Header({
         className="badge"
         id="version-badge"
         title="Current build version"
-        style={{ background: 'rgba(0, 240, 255, 0.1)', color: 'var(--accent-cyan)', border: '1px solid rgba(0, 240, 255, 0.2)' }}
+        style={{ background: 'rgba(0,240,255,0.1)', color: 'var(--accent-cyan)', border: '1px solid rgba(0,240,255,0.2)' }}
       >
-        v0.1.0-alpha
+        v1.0.0
       </span>
 
       <a
-        href="https://github.com"
+        href="https://github.com/Lumnic12/VideoRAG"
         id="github-link"
         className="btn btn-ghost btn-icon"
-        title="GitHub"
+        title="View on GitHub"
         target="_blank"
         rel="noopener noreferrer"
         aria-label="GitHub repository"
-        style={{ color: 'var(--text-main)', textDecoration: 'none', marginLeft: 16 }}
+        style={{ color: 'var(--text-main)', textDecoration: 'none', marginLeft: 8 }}
       >
         ⭐
       </a>

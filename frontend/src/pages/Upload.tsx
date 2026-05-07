@@ -7,11 +7,12 @@ type Phase = 'idle' | 'uploading' | 'processing' | 'done' | 'error'
 
 const PIPELINE_STEPS = [
   { pct: 10,  label: 'Extracting keyframes via SSIM…' },
-  { pct: 35,  label: 'Extracting audio track…' },
-  { pct: 40,  label: 'Analyzing keyframes with VLM…' },
-  { pct: 80,  label: 'Building result payload…' },
-  { pct: 90,  label: 'Indexing into FAISS RAG store…' },
-  { pct: 100, label: 'Done!' },
+  { pct: 30,  label: 'Keyframes extracted' },
+  { pct: 40,  label: 'Extracting audio track…' },
+  { pct: 70,  label: 'VLM analysis + transcription…' },
+  { pct: 85,  label: 'Structuring transcript with LLM…' },
+  { pct: 90,  label: 'Indexing into FAISS RAG…' },
+  { pct: 100, label: 'Done! ✓' },
 ]
 
 function stepForProgress(pct: number): string {
