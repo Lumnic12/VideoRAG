@@ -1,9 +1,6 @@
 # ─── Stage 1: Build the C++ ssim_fast extension ──────────────────────────────
-# Using python:3.12-slim with build tools to compile our pure C extension.
-# The compiled .so is copied into the final stage — no build tools in prod image.
 FROM python:3.12-slim AS cpp-builder
 
-# Install C builder deps
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
         python3-dev \
@@ -13,9 +10,8 @@ WORKDIR /build
 COPY cpp_bindings/ ./cpp_bindings/
 COPY backend/requirements.txt ./
 
-# Build ssim_fast C extension — outputs ssim_fast.cpython-*.so
 WORKDIR /build/cpp_bindings
-RUN python setup_c.py build_ext --inplace || echo "[WARN] C build failed"
+RUN python setup_c.py build_ext --inplace || echo "[WARN] C build failed — using Python fallback"
 RUN touch ssim_fast_dummy.so
 
 
@@ -25,50 +21,48 @@ FROM python:3.12-slim AS py-deps
 WORKDIR /app
 COPY backend/requirements.txt .
 
-# Install all Python deps (cached layer — rebuild only when requirements.txt changes)
-RUN pip install --no-cache-dir -r requirements.txt
+# Install all Python deps (cached layer)
+RUN pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir faster-whisper winocr
 
 
 # ─── Stage 3: Final production image ─────────────────────────────────────────
 FROM python:3.12-slim AS final
 
 LABEL org.opencontainers.image.title="Semantic Video Synthesizer — Backend"
-LABEL org.opencontainers.image.description="FastAPI + Celery pipeline: SSIM keyframes → VLM → FAISS RAG"
+LABEL org.opencontainers.image.description="FastAPI + Celery: SSIM keyframes → OCR → Whisper → FAISS RAG → Ollama LLM"
 
-# Runtime system deps only (no build tools). 
-# opencv-python-headless removes the need for libgl1/libopencv-*
+# Runtime deps: ffmpeg for audio extraction
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ffmpeg \
         libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
-# Create non-root user for security
+# Non-root user
 RUN groupadd --gid 1001 svs && \
     useradd --uid 1001 --gid svs --no-create-home svs
 
 WORKDIR /app
 
-# Copy installed Python packages from py-deps stage
+# Copy Python packages
 COPY --from=py-deps /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
 COPY --from=py-deps /usr/local/bin /usr/local/bin
 
-# Copy compiled C extension (if build succeeded)
+# Copy C extension (if build succeeded)
 COPY --from=cpp-builder /build/cpp_bindings/ssim_fast*.so /app/services/
 
 # Copy application source
 COPY backend/ .
 
-# Create data directories and set permissions
-RUN mkdir -p data/uploads data/keyframes data/faiss_index indexes && \
+# Create data directories
+RUN mkdir -p data/uploads data/keyframes data/faiss_index && \
     chown -R svs:svs /app
 
 USER svs
 
-# Health check — backend must respond within 30s on startup
 HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" || exit 1
 
 EXPOSE 8000
 
-# Default: run FastAPI. Override CMD in docker-compose for the worker.
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

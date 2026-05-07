@@ -3,10 +3,10 @@
 __pycache__/
 *.pyc
 *.pyo
-data/uploads/*
-data/keyframes/*
-data/faiss_index/*
-!data/**/.gitkeep
+backend/data/uploads/*
+backend/data/keyframes/*
+backend/data/faiss_index/*
+!backend/data/**/.gitkeep
 node_modules/
 .next/
 .vercel/

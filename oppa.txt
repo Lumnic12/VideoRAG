@@ -1,4 +1,4 @@
-# Semantic Video Synthesizer — Agent-Driven MVP Blueprint
+# Semantic Video Synthesizer — Agent-Driven MVP Blueprint   //Auto-Builds Interactive Learning Content From Any Video
 
 ---
 
@@ -16,7 +16,7 @@ Create this file at the project root **before writing a single line of code**. E
 ---
 
 ## 1. PROJECT IDENTITY
-- **Name**: Semantic Video Synthesizer
+- **Name**: Semantic Video Synthesizer  //Auto-Builds Interactive Learning Content From Any Video
 - **Type**: Full-stack ML capstone
 - **Goal**: Process lecture videos → extract keyframes via SSIM → analyze with VLM → build queryable RAG knowledge base
 - **Demo Constraint**: Full pipeline must execute in ≤25 seconds on a 10-min video
@@ -877,12 +877,12 @@ export const useJobStore = create<JobState>((set) => ({
 │                      │  Transcript Panel         │
 │   Video Player       │  (auto-scrolls to         │
 │   (with timeline     │   current timestamp)      │
-│    markers)          │                            │
-│                      │                            │
+│    markers)          │                           │
+│                      │                           │
 ├──────────────────────┼───────────────────────────┤
 │  Keyframe Grid       │  Query Panel              │
 │  (clickable →        │  "Ask your Second Brain"  │
-│   seeks video)       │                            │
+│   seeks video)       │                           │
 └──────────────────────┴───────────────────────────┘
 ```
 

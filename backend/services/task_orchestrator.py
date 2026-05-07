@@ -24,7 +24,7 @@ celery_app.conf.update(
     timezone="UTC",
     enable_utc=True,
     task_track_started=True,
-    result_expires=3600,
+    result_expires=86400,
 )
 
 redis_client = redis_lib.from_url(settings.redis_url)
@@ -39,21 +39,32 @@ def update_job(
     data: dict | None = None,
     error: str | None = None,
 ) -> None:
-    """Write job state to Redis for frontend polling."""
-    state: dict = {"status": status, "progress": progress}
+    """Write job state to Redis, preserving existing filename."""
+    # Read existing state to preserve filename
+    existing: dict = {}
+    raw = redis_client.get(f"job:{job_id}")
+    if raw:
+        try:
+            existing = json.loads(raw)
+        except Exception:
+            pass
+    state: dict = {
+        "status": status,
+        "progress": progress,
+        "filename": existing.get("filename", ""),
+    }
     if data:
         state["result"] = data
     if error:
         state["error"] = error
-    redis_client.set(f"job:{job_id}", json.dumps(state), ex=3600)
+    redis_client.set(f"job:{job_id}", json.dumps(state), ex=86400)
 
 
-# ── Pipeline task ─────────────────────────────────────────────────────────────
+# ── Core pipeline (pure function — no Celery binding) ─────────────────────────
 
-@celery_app.task(name="process_video", bind=True)
-def process_video_task(self, job_id: str, video_path: str) -> dict:
+def _run_pipeline(job_id: str, video_path: str) -> dict:
     """
-    Full pipeline orchestration.
+    Core pipeline logic — called by both the Celery task AND the thread fallback.
 
     Steps:
       1. SSIM keyframe extraction         → 10→30 %
@@ -103,7 +114,6 @@ def process_video_task(self, job_id: str, video_path: str) -> dict:
         update_job(job_id, "processing", 80)
         logger.info("pipeline_vlm_done", job_id=job_id, analyses=len(analyses))
 
-        # ── Step 4: Build result dict ─────────────────────────────────────────
         result: dict = {
             "keyframes": [
                 {
@@ -123,6 +133,11 @@ def process_video_task(self, job_id: str, video_path: str) -> dict:
             ],
         }
 
+        # Save transcript to disk for later re-indexing
+        transcript_path = Path(job_kf_dir) / "transcript.json"
+        with open(transcript_path, "w", encoding="utf-8") as f:
+            json.dump(result["transcript"], f, indent=2)
+
         update_job(job_id, "processing", 90)
 
         # ── Step 5: RAG indexing ──────────────────────────────────────────────
@@ -133,16 +148,25 @@ def process_video_task(self, job_id: str, video_path: str) -> dict:
         finally:
             loop2.close()
 
-        # Persist keyframe_count into the Redis payload for polling
+        # Preserve filename from initial Redis entry
+        existing_raw = redis_client.get(f"job:{job_id}")
+        filename = ""
+        if existing_raw:
+            try:
+                filename = json.loads(existing_raw).get("filename", "")
+            except Exception:
+                pass
+
         redis_client.set(
             f"job:{job_id}",
-            __import__("json").dumps({
+            json.dumps({
                 "status": "done",
                 "progress": 100,
+                "filename": filename,
                 "result": result,
                 "keyframe_count": len(keyframes),
             }),
-            ex=3600,
+            ex=86400,
         )
         logger.info("pipeline_complete", job_id=job_id)
         return {"status": "done", "keyframe_count": len(keyframes)}
@@ -151,3 +175,11 @@ def process_video_task(self, job_id: str, video_path: str) -> dict:
         logger.error("pipeline_failed", job_id=job_id, error=str(exc))
         update_job(job_id, "failed", 0, error=str(exc))
         raise
+
+
+# ── Celery task wrapper ───────────────────────────────────────────────────────
+
+@celery_app.task(name="process_video", bind=True)
+def process_video_task(self, job_id: str, video_path: str) -> dict:
+    """Celery task wrapper — delegates to _run_pipeline."""
+    return _run_pipeline(job_id, video_path)

@@ -1,44 +1,51 @@
 # AGENT_CONTEXT.md — Semantic Video Synthesizer
-# Last Updated: 2026-04-02 by Agent
+# Last Updated: 2026-04-16 by Agent
 # Update Rule: Agent MUST update this file after completing any task.
 
-## Current Phase: Project Complete ✅ (All Phases 0-4 Finished)
+## Current Phase: Production Ready ✅ (All Phases 0-4 Complete)
+
+### Architecture: 100% Local Processing
+- **LLM Chat**: Ollama gemma3:1b (local)
+- **Embeddings**: Ollama nomic-embed-text (local)
+- **Audio Transcription**: faster-whisper (local)
+- **OCR/Vision**: Windows built-in OCR via winocr (local)
+- **Vector Store**: FAISS-cpu (local)
+- **Broker**: Redis (local)
 
 ---
 
-## What Was Built (Phase 0) ✅
+## What Was Built (Phase 0-4) ✅
 
 ### Frontend (`frontend/`)
 | File | Purpose |
 |------|---------|
-| `src/index.css` | Full dark-mode design system (tokens, glassmorphism, animations) |
+| `src/index.css` | Full dark-mode design system (tokens, glassmorphism, animations, typing dots) |
 | `src/App.tsx` | Root with React Router — sidebar toggle state |
 | `src/components/Sidebar.tsx` | Collapsible sidebar with nav links + phase tracker + health status |
 | `src/components/Header.tsx` | Sticky header with sidebar toggle + version badge |
 | `src/pages/Home.tsx` | Dashboard: system status cards, stats grid, quick actions |
 | `src/pages/Upload.tsx` | Drag-and-drop video upload with progress + polling |
-| `src/pages/Query.tsx` | Natural-language chat interface with source citations |
+| `src/pages/Chat.tsx` | Multi-turn conversational chat with markdown rendering, follow-up chips, conversation memory |
+| `src/pages/Query.tsx` | Single-shot query interface with source citations |
 | `src/pages/Keyframes.tsx` | Gallery page — uses real `image_url` static files |
 | `src/hooks/useHealth.ts` | Custom hook polling `/api/v1/health` every 30s |
-| `src/lib/api.ts` | Typed Axios client for all backend endpoints |
+| `src/lib/api.ts` | Typed API client with ChatHistoryMessage support |
 | `vite.config.ts` | Port 3000, proxy `/api` → `localhost:8000` |
-
-**Status**: ✅ Renders at `localhost:3000`, all pages navigable, sidebar collapses.
+| `Dockerfile` | Multi-stage: node build → nginx serve |
 
 ### Backend (`backend/`)
 | File | Purpose |
 |------|---------|
 | `main.py` | FastAPI app with lifespan, CORS, static files, routers |
-| `api/routes/video.py` | `/upload`, `/process`, `/tasks/{id}`, `/jobs/{id}`, `/keyframes/{id}`, `/health` |
-| `api/routes/query.py` | `POST /api/v1/query` with latency_ms + dual alias fields |
+| `api/routes/video.py` | Upload, process, list, delete videos — stores original filenames in Redis |
+| `api/routes/query.py` | `POST /api/v1/query` with chat_history support for multi-turn conversations |
 | `api/routes/ws.py` | WebSocket `/ws/jobs/{job_id}` — real-time progress streaming |
-| `models/schemas.py` | All Pydantic schemas — task_id, KeyframeInfo, QuerySource dual-fields |
-| `services/frame_extractor.py` | SSIM keyframe extractor — Phase 3: C++ fast-path + Python fallback |
-| `services/task_orchestrator.py` | Celery app + `process_video` task — emits `status: done` |
-| `services/celery_worker.py` | Windows entrypoint — auto-applies `--pool=solo` on win32 |
-| `services/rag_service.py` | FAISS RAG engine — real embeddings with OpenAI stub fallback |
-| `services/vlm_service.py` | Jina-VLM via HuggingFace Inference API — graceful stub |
-| `services/audio_service.py` | Deepgram nova-2 transcription — graceful stub |
+| `models/schemas.py` | All Pydantic schemas — ChatMessage, QueryRequest with chat_history |
+| `services/frame_extractor.py` | SSIM keyframe extractor — C++ fast-path + Python fallback |
+| `services/task_orchestrator.py` | Celery app + `process_video` task |
+| `services/rag_service.py` | FAISS RAG engine — Ollama-only LLM, nomic-embed-text embeddings |
+| `services/vlm_service.py` | Windows OCR (winocr) + Ollama enrichment — 100% local |
+| `services/audio_service.py` | faster-whisper local transcription (Deepgram fallback) |
 | `tests/unit/test_frame_extractor.py` | pytest suite for frame extractor (11 tests) |
 | `tests/unit/test_rag_service.py` | pytest suite for RAG service (8 tests) |
 | `tests/unit/conftest.py` | Shared fixtures — `sample_video_path` session fixture |

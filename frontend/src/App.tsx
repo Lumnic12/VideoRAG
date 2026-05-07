@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { Sidebar } from './components/Sidebar'
 import { Header } from './components/Header'
@@ -7,9 +7,16 @@ import { Upload } from './pages/Upload'
 import { Query } from './pages/Query'
 import { Keyframes } from './pages/Keyframes'
 import { Results } from './pages/Results'
+import { Chat } from './pages/Chat'
 
 export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [lightTheme, setLightTheme] = useState(false)
+
+  useEffect(() => {
+    if (lightTheme) document.body.classList.add('light-theme')
+    else document.body.classList.remove('light-theme')
+  }, [lightTheme])
 
   return (
     <BrowserRouter>
@@ -23,11 +30,14 @@ export default function App() {
           <Header
             sidebarCollapsed={sidebarCollapsed}
             onToggleSidebar={() => setSidebarCollapsed((c) => !c)}
+            lightTheme={lightTheme}
+            onToggleLightTheme={() => setLightTheme(!lightTheme)}
           />
 
           <main style={{ flex: 1, position: 'relative' }}>
             <Routes>
               <Route path="/" element={<Home />} />
+              <Route path="/chat" element={<Chat />} />
               <Route path="/upload" element={<Upload />} />
               <Route path="/query" element={<Query />} />
               <Route path="/keyframes" element={<Keyframes />} />

@@ -1,6 +1,7 @@
 """
 RAG query route.
-POST /api/v1/query — retrieve context from FAISS, synthesise answer with GPT-4o-mini.
+POST /api/v1/query — retrieve context from FAISS, synthesise answer with LLM.
+Supports multi-turn conversation via chat_history.
 """
 from __future__ import annotations
 
@@ -19,10 +20,12 @@ router = APIRouter(prefix="/api/v1", tags=["query"])
 @router.post("/query", response_model=QueryResponse)
 async def ask_second_brain(req: QueryRequest) -> QueryResponse:
     """
-    Retrieve relevant chunks from FAISS, synthesise answer with GPT-4o-mini.
+    Retrieve relevant chunks from FAISS, synthesise answer with LLM.
+    Supports multi-turn conversation via optional chat_history field.
     Returns grounded answer + source citations.
     """
-    logger.info("query_received", question=req.question[:80])
+    logger.info("query_received", question=req.question[:80],
+                has_history=bool(req.chat_history))
     t0 = time.monotonic()
 
     # Merge video_id (singular) and video_ids (list)
@@ -30,10 +33,16 @@ async def ask_second_brain(req: QueryRequest) -> QueryResponse:
     if req.video_id and not vid_ids:
         vid_ids = [req.video_id]
 
+    # Convert chat_history from Pydantic models to dicts for the RAG service
+    history_dicts = None
+    if req.chat_history:
+        history_dicts = [{"role": m.role, "content": m.content} for m in req.chat_history]
+
     result = await rag_service.query_and_answer(
         question=req.question,
         video_ids=vid_ids,
-        top_k=5,
+        top_k=20,
+        chat_history=history_dicts,
     )
 
     latency_ms = round((time.monotonic() - t0) * 1000, 1)

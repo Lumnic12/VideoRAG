@@ -1,11 +1,15 @@
 """
 Audio transcription service.
-Extracts audio from video via ffmpeg, sends to Deepgram nova-2,
-returns timestamped transcript segments.
+Extracts audio from video via ffmpeg, transcribes with best available provider.
+
+Provider priority:
+  1. Deepgram nova-2 (if DEEPGRAM_API_KEY set) — fastest, cloud-based
+  2. Local Whisper via faster-whisper (free, runs on CPU) — ~10-30s for 10-min video
+  3. Stub fallback — returns placeholder segments
 
 Graceful stubs:
 - ffmpeg missing  → returns empty transcript with warning
-- DEEPGRAM_API_KEY missing → returns stub segments
+- All providers unavailable → returns stub segments
 """
 from __future__ import annotations
 
@@ -19,6 +23,14 @@ import structlog
 from core.config import settings
 
 logger = structlog.get_logger()
+
+# Check for faster-whisper availability
+try:
+    from faster_whisper import WhisperModel
+    _WHISPER_OK = True
+except ImportError:
+    _WHISPER_OK = False
+    logger.debug("faster_whisper_not_installed", hint="pip install faster-whisper for local transcription")
 
 
 @dataclass
@@ -84,24 +96,67 @@ def extract_audio(video_path: str, output_dir: str) -> str | None:
     return audio_path
 
 
-async def transcribe_audio(audio_path: str | None) -> list[TranscriptSegment]:
-    """
-    Send audio file to Deepgram nova-2 and return timestamped utterances.
+# ── Whisper Local Transcription ───────────────────────────────────────────────
 
-    Args:
-        audio_path: Path to WAV file from extract_audio(), or None if skipped.
+_whisper_model = None
 
-    Returns:
-        List of TranscriptSegment. Empty list if audio_path is None or key missing.
+
+def _get_whisper_model():
+    """Lazy-load Whisper model (downloads ~150MB on first use)."""
+    global _whisper_model
+    if _whisper_model is None and _WHISPER_OK:
+        logger.info("whisper_loading", model="base", compute="int8")
+        _whisper_model = WhisperModel("base", device="cpu", compute_type="int8")
+        logger.info("whisper_loaded")
+    return _whisper_model
+
+
+async def _transcribe_via_whisper(audio_path: str) -> list[TranscriptSegment]:
     """
-    if audio_path is None:
-        logger.warning("transcription_skipped", reason="no audio file (ffmpeg unavailable)")
+    Transcribe audio using local faster-whisper model.
+    Runs in a thread to avoid blocking the event loop.
+    """
+    model = _get_whisper_model()
+    if model is None:
         return []
 
-    if not settings.deepgram_api_key:
-        logger.warning("transcription_skipped", reason="no DEEPGRAM_API_KEY")
-        return [TranscriptSegment(0.0, 5.0, "[Transcription stub — add DEEPGRAM_API_KEY]")]
+    def _run():
+        segments_out = []
+        segments, info = model.transcribe(
+            audio_path,
+            beam_size=5,
+            language=None,  # auto-detect
+            vad_filter=True,  # skip silence
+            vad_parameters=dict(
+                min_silence_duration_ms=500,
+                speech_pad_ms=200,
+            ),
+        )
+        logger.info("whisper_transcribing", language=info.language,
+                     language_prob=round(info.language_probability, 2))
 
+        for segment in segments:
+            segments_out.append(TranscriptSegment(
+                start=round(segment.start, 2),
+                end=round(segment.end, 2),
+                text=segment.text.strip(),
+            ))
+
+        return segments_out
+
+    try:
+        result = await asyncio.to_thread(_run)
+        logger.info("whisper_transcription_complete", segments=len(result))
+        return result
+    except Exception as e:
+        logger.error("whisper_transcription_error", error=str(e)[:200])
+        return []
+
+
+# ── Deepgram Transcription ────────────────────────────────────────────────────
+
+async def _transcribe_via_deepgram(audio_path: str) -> list[TranscriptSegment]:
+    """Transcribe using Deepgram nova-2 API."""
     try:
         from deepgram import DeepgramClient, PrerecordedOptions
     except ImportError:
@@ -138,5 +193,43 @@ async def transcribe_audio(audio_path: str | None) -> list[TranscriptSegment]:
             text=utterance.transcript,
         ))
 
-    logger.info("transcription_complete", segments=len(segments))
+    logger.info("deepgram_transcription_complete", segments=len(segments))
     return segments
+
+
+# ── Main Transcription Entrypoint ─────────────────────────────────────────────
+
+async def transcribe_audio(audio_path: str | None) -> list[TranscriptSegment]:
+    """
+    Transcribe audio file using the best available provider.
+
+    Priority: Deepgram (if key set) → Whisper local → stub
+
+    Args:
+        audio_path: Path to WAV file from extract_audio(), or None if skipped.
+
+    Returns:
+        List of TranscriptSegment. Empty list if audio_path is None.
+    """
+    if audio_path is None:
+        logger.warning("transcription_skipped", reason="no audio file (ffmpeg unavailable)")
+        return []
+
+    # 1. Try Deepgram (fast cloud API)
+    if settings.deepgram_api_key:
+        logger.info("transcription_provider", using="deepgram")
+        result = await _transcribe_via_deepgram(audio_path)
+        if result:
+            return result
+        logger.warning("deepgram_failed_trying_whisper")
+
+    # 2. Try local Whisper (free, runs on CPU)
+    if _WHISPER_OK:
+        logger.info("transcription_provider", using="whisper-local")
+        result = await _transcribe_via_whisper(audio_path)
+        if result:
+            return result
+
+    # 3. Stub fallback
+    logger.warning("transcription_stub", reason="no transcription provider available")
+    return [TranscriptSegment(0.0, 5.0, "[Transcription unavailable — install faster-whisper or set DEEPGRAM_API_KEY]")]

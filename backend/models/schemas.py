@@ -53,10 +53,17 @@ class JobStatusResponse(BaseModel):
 
 # ── RAG Query ─────────────────────────────────────────────────────────────────
 
+class ChatMessage(BaseModel):
+    """A single message in a multi-turn conversation."""
+    role: str        # "user" or "assistant"
+    content: str
+
+
 class QueryRequest(BaseModel):
     question: str
     video_id: str | None = None      # convenience singular
     video_ids: list[str] | None = None
+    chat_history: list[ChatMessage] | None = None  # multi-turn conversation history
 
 
 class QuerySource(BaseModel):

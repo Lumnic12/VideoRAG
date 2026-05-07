@@ -1,20 +1,20 @@
-# docker-compose.yml — Semantic Video Synthesizer
-# Full-stack: Redis + Backend API + Celery Worker + Frontend (nginx)
+# docker-compose.yml — Semantic Video Synthesizer (Production)
+# 100% LOCAL: Ollama LLM + Windows OCR + Whisper + FAISS
 #
 # Usage:
 #   docker compose up --build           # first run — builds all images
-#   docker compose up                   # subsequent runs (cached images)
-#   docker compose up --scale worker=2  # run 2 parallel workers
+#   docker compose up -d                # run in background
 #   docker compose logs -f backend      # tail backend logs
-#   docker compose down -v              # stop + remove volumes
+#   docker compose down                 # stop all services
+#   docker compose --profile monitoring up  # include Flower UI
 #
-# Environment:
-#   Copy .env.example → .env and fill in API keys before starting.
-#   Required: DEEPGRAM_API_KEY, OPENAI_API_KEY, HF_API_TOKEN
+# Prerequisites:
+#   - Ollama running on host: ollama serve
+#   - Models pulled: ollama pull gemma3:1b && ollama pull nomic-embed-text
 
 services:
 
-  # ── Infrastructure ──────────────────────────────────────────────────────────
+  # ── Redis — Message broker + result store ──────────────────────────────────
 
   redis:
     image: redis:7-alpine
@@ -24,7 +24,12 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
-    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    command: >
+      redis-server
+      --appendonly yes
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --save 60 1000
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -45,19 +50,20 @@ services:
     env_file:
       - .env
     environment:
-      # Override path settings to use Docker volume mount paths
       REDIS_URL: redis://redis:6379/0
       UPLOAD_DIR: /app/data/uploads
       KEYFRAME_DIR: /app/data/keyframes
       FAISS_INDEX_PATH: /app/data/faiss_index
+      # Connect to Ollama running on the host machine
+      OLLAMA_BASE_URL: http://host.docker.internal:11434/v1
+      OLLAMA_MODEL: gemma3:1b
     volumes:
-      # Persist uploaded videos, extracted keyframes, and FAISS index
       - app_data:/app/data
-      # Hot-reload source on dev (comment out for prod)
-      # - ./backend:/app
     depends_on:
       redis:
         condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
       test: ["CMD", "python", "-c",
              "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
@@ -66,9 +72,7 @@ services:
       start_period: 30s
       retries: 3
 
-  # ── Celery Worker ───────────────────────────────────────────────────────────
-  # Runs the same image as backend but with a different CMD.
-  # On Linux (Docker), uses default prefork pool — pool=solo NOT needed here.
+  # ── Celery Worker — Video processing pipeline ──────────────────────────────
 
   worker:
     build:
@@ -77,7 +81,6 @@ services:
       target: final
     container_name: svs-worker
     restart: unless-stopped
-    # prefork pool with 2 concurrent task slots
     command: >
       celery -A services.task_orchestrator worker
       --loglevel=info
@@ -90,6 +93,8 @@ services:
       UPLOAD_DIR: /app/data/uploads
       KEYFRAME_DIR: /app/data/keyframes
       FAISS_INDEX_PATH: /app/data/faiss_index
+      OLLAMA_BASE_URL: http://host.docker.internal:11434/v1
+      OLLAMA_MODEL: gemma3:1b
     volumes:
       - app_data:/app/data
     depends_on:
@@ -97,36 +102,8 @@ services:
         condition: service_healthy
       backend:
         condition: service_healthy
-
-  # ── Celery Beat (optional — for scheduled tasks) ────────────────────────────
-  # Uncomment if you add periodic tasks (e.g., index cleanup, health reports).
-  #
-  # beat:
-  #   build:
-  #     context: .
-  #     dockerfile: Dockerfile.backend
-  #     target: final
-  #   command: celery -A services.task_orchestrator beat --loglevel=info
-  #   env_file: [.env]
-  #   environment:
-  #     REDIS_URL: redis://redis:6379/0
-  #   depends_on: [redis]
-
-  # ── Flower — Celery monitoring UI (dev only) ────────────────────────────────
-  flower:
-    image: mher/flower:2.0
-    container_name: svs-flower
-    restart: unless-stopped
-    ports:
-      - "5555:5555"
-    environment:
-      CELERY_BROKER_URL: redis://redis:6379/0
-      FLOWER_PORT: 5555
-    depends_on:
-      redis:
-        condition: service_healthy
-    profiles:
-      - dev       # only starts with: docker compose --profile dev up
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   # ── Frontend (nginx serving Vite build) ────────────────────────────────────
 
@@ -148,6 +125,23 @@ services:
       start_period: 10s
       retries: 3
 
+  # ── Flower — Celery monitoring (optional) ──────────────────────────────────
+
+  flower:
+    image: mher/flower:2.0
+    container_name: svs-flower
+    restart: unless-stopped
+    ports:
+      - "5555:5555"
+    environment:
+      CELERY_BROKER_URL: redis://redis:6379/0
+      FLOWER_PORT: 5555
+    depends_on:
+      redis:
+        condition: service_healthy
+    profiles:
+      - monitoring
+
 
 # ── Named volumes ───────────────────────────────────────────────────────────
 volumes:
@@ -155,10 +149,3 @@ volumes:
     driver: local
   app_data:
     driver: local
-
-
-# ── Networks ────────────────────────────────────────────────────────────────
-# Default bridge network — all services can reach each other by service name.
-# frontend → backend:8000  (nginx proxy_pass)
-# backend  → redis:6379
-# worker   → redis:6379

@@ -8,6 +8,7 @@ interface SidebarProps {
 
 const NAV_ITEMS = [
   { to: '/', icon: '⚡', label: 'Dashboard' },
+  { to: '/chat', icon: '💬', label: 'Video Chat' },
   { to: '/upload', icon: '📤', label: 'Upload Video' },
   { to: '/query', icon: '🔍', label: 'Ask VideoRAG' },
   { to: '/keyframes', icon: '🎞️', label: 'Keyframes' },
@@ -15,9 +16,9 @@ const NAV_ITEMS = [
 
 const PHASE_ITEMS = [
   { label: 'Phase 0: Skeleton ✓', done: true },
-  { label: 'Phase 1: Ingestion', done: false },
-  { label: 'Phase 2: RAG Engine', done: false },
-  { label: 'Phase 3: SSIM Polish', done: false },
+  { label: 'Phase 1: Ingestion ✓', done: true },
+  { label: 'Phase 2: RAG Engine ✓', done: true },
+  { label: 'Phase 3: SSIM Polish ✓', done: true },
 ]
 
 export function Sidebar({ collapsed, onToggle }: SidebarProps) {
