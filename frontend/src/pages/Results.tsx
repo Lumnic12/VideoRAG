@@ -31,6 +31,7 @@ export function Results() {
   const [audioTime, setAudioTime] = useState(0)
   const [slideshow, setSlideshow] = useState(false)
   const [slideshowSpeed, setSlideshowSpeed] = useState(2000)
+  const [transcriptTab, setTranscriptTab] = useState<'near' | 'full'>('near')
   const audioRef = useRef<HTMLAudioElement>(null)
   const slideshowRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const thumbnailRefs = useRef<(HTMLDivElement | null)[]>([])
@@ -133,9 +134,9 @@ export function Results() {
     </div>
   )
 
-  // Active transcript segments (within ±30s of selected keyframe)
+  // Active transcript segments (within ±60s of selected keyframe)
   const nearTranscript = transcript.filter(s =>
-    selected ? (s.start >= selected.timestamp_sec - 3 && s.start <= selected.timestamp_sec + 45) : false
+    selected ? (s.start >= selected.timestamp_sec - 5 && s.start <= selected.timestamp_sec + 60) : false
   )
   // Current playing transcript
   const currentSegs = transcript.filter(s => s.start <= audioTime && s.end >= audioTime)
@@ -417,42 +418,84 @@ export function Results() {
               </div>
             </div>
 
-            {/* Transcript near this frame */}
+            {/* Transcript panel */}
             {transcript.length > 0 && (
               <div className="card" style={{ background: 'rgba(15,23,42,0.8)' }}>
-                <h3 style={{ fontSize: 13, fontWeight: 700, marginBottom: 10, color: 'var(--text-primary)' }}>
-                  📝 Transcript
-                  <span style={{ fontSize: 11, color: '#64748b', fontWeight: 400, marginLeft: 6 }}>
-                    near this frame
+                {/* Tab headers */}
+                <div style={{ display: 'flex', gap: 0, marginBottom: 10, borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
+                  {(['near', 'full'] as const).map(tab => (
+                    <button
+                      key={tab}
+                      onClick={() => setTranscriptTab(tab)}
+                      style={{
+                        background: 'none', border: 'none', cursor: 'pointer',
+                        padding: '6px 14px', fontSize: 12, fontWeight: 700,
+                        color: transcriptTab === tab ? '#818cf8' : '#475569',
+                        borderBottom: transcriptTab === tab ? '2px solid #818cf8' : '2px solid transparent',
+                        transition: 'all 0.2s',
+                      }}
+                    >
+                      {tab === 'near' ? '📍 Near Frame' : '📋 Full Transcript'}
+                    </button>
+                  ))}
+                  <span style={{ marginLeft: 'auto', fontSize: 10, color: '#334155', alignSelf: 'center', paddingRight: 4 }}>
+                    {transcript.length} segs
                   </span>
-                </h3>
-                <div style={{ maxHeight: 320, overflowY: 'auto' }}>
-                  {nearTranscript.length > 0 ? nearTranscript.map((s, i) => {
-                    const isActive = audioTime >= s.start && audioTime <= s.end
-                    return (
-                      <div
-                        key={i}
-                        onClick={() => { if (audioRef.current) audioRef.current.currentTime = s.start }}
-                        style={{
-                          padding: '6px 8px',
-                          marginBottom: 4,
-                          borderRadius: 8,
-                          background: isActive ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.03)',
-                          border: isActive ? '1px solid rgba(99,102,241,0.4)' : '1px solid transparent',
-                          cursor: hasAudio ? 'pointer' : 'default',
-                          transition: 'all 0.2s ease',
-                          fontSize: 12,
-                          lineHeight: 1.5,
-                        }}
-                      >
-                        <span style={{ color: '#818cf8', fontWeight: 700, fontFamily: 'monospace', marginRight: 8 }}>
-                          {fmt(s.start)}
-                        </span>
-                        <span style={{ color: isActive ? '#e2e8f0' : '#94a3b8' }}>{s.text}</span>
-                      </div>
-                    )
-                  }) : (
-                    <p className="text-sm text-muted">No transcript near this frame.</p>
+                </div>
+
+                <div style={{ maxHeight: 340, overflowY: 'auto' }}>
+                  {transcriptTab === 'near' ? (
+                    nearTranscript.length > 0 ? nearTranscript.map((s, i) => {
+                      const isActive = audioTime >= s.start && audioTime <= s.end
+                      return (
+                        <div
+                          key={i}
+                          onClick={() => { if (audioRef.current) audioRef.current.currentTime = s.start }}
+                          style={{
+                            padding: '6px 8px', marginBottom: 4, borderRadius: 8,
+                            background: isActive ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.03)',
+                            border: isActive ? '1px solid rgba(99,102,241,0.4)' : '1px solid transparent',
+                            cursor: hasAudio ? 'pointer' : 'default',
+                            transition: 'all 0.2s ease', fontSize: 12, lineHeight: 1.5,
+                          }}
+                        >
+                          <span style={{ color: '#818cf8', fontWeight: 700, fontFamily: 'monospace', marginRight: 8 }}>
+                            {fmt(s.start)}
+                          </span>
+                          <span style={{ color: isActive ? '#e2e8f0' : '#94a3b8' }}>{s.text}</span>
+                        </div>
+                      )
+                    }) : <p className="text-sm text-muted">No transcript near this frame.</p>
+                  ) : (
+                    // Full transcript — all segments
+                    transcript.map((s, i) => {
+                      const isActive = audioTime >= s.start && audioTime <= s.end
+                      const isNearSelected = selected
+                        ? (s.start >= selected.timestamp_sec - 5 && s.start <= selected.timestamp_sec + 60)
+                        : false
+                      return (
+                        <div
+                          key={i}
+                          onClick={() => { if (audioRef.current) audioRef.current.currentTime = s.start }}
+                          style={{
+                            padding: '5px 8px', marginBottom: 3, borderRadius: 7,
+                            background: isActive
+                              ? 'rgba(99,102,241,0.18)'
+                              : isNearSelected
+                              ? 'rgba(99,102,241,0.05)'
+                              : 'transparent',
+                            border: isActive ? '1px solid rgba(99,102,241,0.4)' : '1px solid transparent',
+                            cursor: hasAudio ? 'pointer' : 'default',
+                            transition: 'background 0.15s', fontSize: 11.5, lineHeight: 1.5,
+                          }}
+                        >
+                          <span style={{ color: isNearSelected ? '#a78bfa' : '#475569', fontWeight: 700, fontFamily: 'monospace', marginRight: 6, fontSize: 10 }}>
+                            {fmt(s.start)}
+                          </span>
+                          <span style={{ color: isActive ? '#e2e8f0' : isNearSelected ? '#cbd5e1' : '#64748b' }}>{s.text}</span>
+                        </div>
+                      )
+                    })
                   )}
                 </div>
               </div>
