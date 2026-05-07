@@ -1,27 +1,59 @@
+# ── Python ────────────────────────────────────────────────────────────────────
 .venv/
-.env
 __pycache__/
 *.pyc
 *.pyo
+*.pyd
+*.egg-info/
+.pytest_cache/
+
+# ── Environment / secrets ──────────────────────────────────────────────────────
+.env
+
+# ── Runtime data (keep folder stubs via .gitkeep) ────────────────────────────
+data/uploads/*
+data/keyframes/*
+data/faiss_index/*
 backend/data/uploads/*
 backend/data/keyframes/*
 backend/data/faiss_index/*
-!backend/data/**/.gitkeep
+backend/keyframes/*
+backend/uploads/*
+backend/indexes/*
+!**/data/**/.gitkeep
+!**/.gitkeep
+
+# ── Logs & debug artefacts ────────────────────────────────────────────────────
+*.log
+*.txt
+!README.md
+!backend/requirements.txt
+!.env.example
+!backend/tests/pipeline_out.txt
+
+# ── Node / frontend build ─────────────────────────────────────────────────────
 node_modules/
 .next/
 .vercel/
-*.log
-.DS_Store
-Thumbs.db
 dist/
 build/
 
-# Docker
+# ── OS cruft ──────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Docker override (local-only) ──────────────────────────────────────────────
 docker-compose.override.yml
+
+# ── C++ / C compiled extensions ──────────────────────────────────────────────
 cpp_bindings/build/
 cpp_bindings/build_cmake/
 cpp_bindings/*.egg-info/
 cpp_bindings/ssim_cpp*.so
 cpp_bindings/ssim_cpp*.pyd
+cpp_bindings/ssim_fast*.so
+cpp_bindings/ssim_fast*.pyd
 backend/services/ssim_cpp*.so
 backend/services/ssim_cpp*.pyd
+backend/services/ssim_fast*.so
+backend/services/ssim_fast*.pyd

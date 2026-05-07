@@ -62,7 +62,12 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://svs-frontend:3000",   # Docker internal name
+        "http://frontend:3000",       # Docker compose service name
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

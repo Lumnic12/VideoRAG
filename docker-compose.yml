@@ -1,21 +1,22 @@
-# docker-compose.yml — Semantic Video Synthesizer (Production)
-# 100% LOCAL: Ollama LLM + Windows OCR + Whisper + FAISS
-#
-# Usage:
-#   docker compose up --build           # first run — builds all images
-#   docker compose up -d                # run in background
-#   docker compose logs -f backend      # tail backend logs
-#   docker compose down                 # stop all services
-#   docker compose --profile monitoring up  # include Flower UI
-#
-# Prerequisites:
-#   - Ollama running on host: ollama serve
-#   - Models pulled: ollama pull gemma3:1b && ollama pull nomic-embed-text
+# ╔══════════════════════════════════════════════════════════════════════════════╗
+# ║  Semantic Video Synthesizer — Single-Command Deployment                    ║
+# ║                                                                            ║
+# ║  Prerequisites (run ONCE before first launch):                            ║
+# ║    1. Install Docker Desktop  → https://www.docker.com/products/docker-desktop ║
+# ║    2. Install Ollama          → https://ollama.com                        ║
+# ║    3. ollama pull gemma3:1b                                                ║
+# ║       ollama pull nomic-embed-text                                        ║
+# ║       ollama pull moondream                                               ║
+# ║                                                                            ║
+# ║  Launch everything:                                                        ║
+# ║    docker compose up --build                                               ║
+# ║                                                                            ║
+# ║  Then open → http://localhost:3000                                         ║
+# ╚══════════════════════════════════════════════════════════════════════════════╝
 
 services:
 
-  # ── Redis — Message broker + result store ──────────────────────────────────
-
+  # ── 1. Redis — Message broker & result store ──────────────────────────────
   redis:
     image: redis:7-alpine
     container_name: svs-redis
@@ -35,28 +36,33 @@ services:
       interval: 10s
       timeout: 3s
       retries: 5
+      start_period: 5s
 
-  # ── Backend API (FastAPI + uvicorn) ─────────────────────────────────────────
-
+  # ── 2. Backend API — FastAPI + uvicorn ────────────────────────────────────
   backend:
     build:
       context: .
       dockerfile: Dockerfile.backend
       target: final
+    image: svs-backend:latest
     container_name: svs-backend
     restart: unless-stopped
     ports:
       - "8000:8000"
-    env_file:
-      - .env
     environment:
+      # Infrastructure
       REDIS_URL: redis://redis:6379/0
+      # Storage (persisted in named volume)
       UPLOAD_DIR: /app/data/uploads
       KEYFRAME_DIR: /app/data/keyframes
       FAISS_INDEX_PATH: /app/data/faiss_index
-      # Connect to Ollama running on the host machine
+      # Ollama — connects to host machine where `ollama serve` is running
       OLLAMA_BASE_URL: http://host.docker.internal:11434/v1
-      OLLAMA_MODEL: gemma3:1b
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma3:1b}
+      OLLAMA_VISION_MODEL: ${OLLAMA_VISION_MODEL:-moondream}
+      # Pipeline tuning
+      SSIM_THRESHOLD: ${SSIM_THRESHOLD:-0.95}
+      MAX_UPLOAD_SIZE_MB: ${MAX_UPLOAD_SIZE_MB:-500}
     volumes:
       - app_data:/app/data
     depends_on:
@@ -69,16 +75,16 @@ services:
              "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 15s
       timeout: 5s
-      start_period: 30s
-      retries: 3
+      start_period: 45s
+      retries: 5
 
-  # ── Celery Worker — Video processing pipeline ──────────────────────────────
-
+  # ── 3. Celery Worker — Video processing pipeline ──────────────────────────
   worker:
     build:
       context: .
       dockerfile: Dockerfile.backend
       target: final
+    image: svs-backend:latest          # reuse the same built image — no second build
     container_name: svs-worker
     restart: unless-stopped
     command: >
@@ -86,17 +92,17 @@ services:
       --loglevel=info
       --concurrency=2
       --hostname=svs-worker@%h
-    env_file:
-      - .env
     environment:
       REDIS_URL: redis://redis:6379/0
       UPLOAD_DIR: /app/data/uploads
       KEYFRAME_DIR: /app/data/keyframes
       FAISS_INDEX_PATH: /app/data/faiss_index
       OLLAMA_BASE_URL: http://host.docker.internal:11434/v1
-      OLLAMA_MODEL: gemma3:1b
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma3:1b}
+      OLLAMA_VISION_MODEL: ${OLLAMA_VISION_MODEL:-moondream}
+      SSIM_THRESHOLD: ${SSIM_THRESHOLD:-0.95}
     volumes:
-      - app_data:/app/data
+      - app_data:/app/data          # shares uploads/keyframes/index with backend
     depends_on:
       redis:
         condition: service_healthy
@@ -105,12 +111,15 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
-  # ── Frontend (nginx serving Vite build) ────────────────────────────────────
-
+  # ── 4. Frontend — Vite/React built & served via nginx ─────────────────────
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        # nginx reverse-proxies /api → backend:8000, so the frontend just uses /api
+        VITE_API_BASE: ""
+    image: svs-frontend:latest
     container_name: svs-frontend
     restart: unless-stopped
     ports:
@@ -122,28 +131,11 @@ services:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/"]
       interval: 15s
       timeout: 5s
-      start_period: 10s
+      start_period: 15s
       retries: 3
 
-  # ── Flower — Celery monitoring (optional) ──────────────────────────────────
 
-  flower:
-    image: mher/flower:2.0
-    container_name: svs-flower
-    restart: unless-stopped
-    ports:
-      - "5555:5555"
-    environment:
-      CELERY_BROKER_URL: redis://redis:6379/0
-      FLOWER_PORT: 5555
-    depends_on:
-      redis:
-        condition: service_healthy
-    profiles:
-      - monitoring
-
-
-# ── Named volumes ───────────────────────────────────────────────────────────
+# ── Named volumes (persistent across restarts) ────────────────────────────────
 volumes:
   redis_data:
     driver: local
