@@ -108,11 +108,7 @@ def _run_pipeline(job_id: str, video_path: str) -> dict:
             tr_coro = transcribe_audio(audio_path)
             return await asyncio.gather(vlm_coro, tr_coro)
 
-        loop = asyncio.new_event_loop()
-        try:
-            analyses, transcript = loop.run_until_complete(_parallel())
-        finally:
-            loop.close()
+        analyses, transcript = asyncio.run(_parallel())
 
         update_job(job_id, "processing", 70)
         logger.info("pipeline_vlm_done", job_id=job_id, analyses=len(analyses))
@@ -127,13 +123,12 @@ def _run_pipeline(job_id: str, video_path: str) -> dict:
         raw_segs = [{"start": s.start, "end": s.end, "text": s.text}
                     for s in transcript]
 
-        loop3 = asyncio.new_event_loop()
         try:
-            structured_sections = loop3.run_until_complete(
+            structured_sections = asyncio.run(
                 structure_transcript(raw_segs)
             )
-        finally:
-            loop3.close()
+        except Exception:
+            structured_sections = []
 
         update_job(job_id, "processing", 85)
         logger.info("pipeline_structure_done", job_id=job_id,
@@ -180,11 +175,10 @@ def _run_pipeline(job_id: str, video_path: str) -> dict:
 
         # ── Step 5: RAG indexing ──────────────────────────────────────────────
         logger.info("pipeline_step5_rag", job_id=job_id)
-        loop2 = asyncio.new_event_loop()
         try:
-            loop2.run_until_complete(rag_service.index_content(job_id, result))
-        finally:
-            loop2.close()
+            asyncio.run(rag_service.index_content(job_id, result))
+        except Exception as idx_err:
+            logger.error("rag_index_failed", job_id=job_id, error=str(idx_err))
 
         # Preserve filename from initial Redis entry
         existing_raw = redis_client.get(f"job:{job_id}")
