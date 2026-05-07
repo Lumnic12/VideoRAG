@@ -16,18 +16,13 @@ redis>=5.0.4
 
 # ── Video / Image Processing ──
 opencv-python-headless>=4.9.0
+scikit-image>=0.22.0
 Pillow>=10.4.0
-numpy>=2.0,<2.1
+numpy>=2.0
 
 # ── AI / ML ──
 openai>=1.35.0
 faiss-cpu>=1.8.0
-
-# ── Audio Transcription ──
-faster-whisper>=1.0.3
-
-# ── OCR (Windows built-in OCR wrapper) ──
-winocr>=0.0.15
 
 # ── Logging ──
 structlog>=24.2.0
@@ -35,3 +30,8 @@ structlog>=24.2.0
 # ── Testing ──
 pytest>=8.2.2
 pytest-asyncio>=0.23.8
+
+# NOTE: These are installed separately in Dockerfile.backend because they are
+# optional or platform-specific:
+#   faster-whisper  — works on Linux, installed after core deps
+#   winocr          — Windows-only (WinRT), skipped on Linux with || true

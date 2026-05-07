@@ -111,6 +111,14 @@ def _get_whisper_model():
     return _whisper_model
 
 
+# Pre-warm Whisper at import time so first job doesn't stall
+if _WHISPER_OK:
+    try:
+        _get_whisper_model()
+    except Exception as _e:
+        logger.warning("whisper_prewarm_failed", error=str(_e))
+
+
 async def _transcribe_via_whisper(audio_path: str) -> list[TranscriptSegment]:
     """
     Transcribe audio using local faster-whisper model.
@@ -145,9 +153,16 @@ async def _transcribe_via_whisper(audio_path: str) -> list[TranscriptSegment]:
         return segments_out
 
     try:
-        result = await asyncio.to_thread(_run)
+        # 5-minute hard timeout — Whisper on CPU for long videos can be slow
+        result = await asyncio.wait_for(
+            asyncio.to_thread(_run),
+            timeout=300.0,
+        )
         logger.info("whisper_transcription_complete", segments=len(result))
         return result
+    except asyncio.TimeoutError:
+        logger.warning("whisper_timeout", msg="Transcription exceeded 5 min — returning empty")
+        return []
     except Exception as e:
         logger.error("whisper_transcription_error", error=str(e)[:200])
         return []
