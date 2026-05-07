@@ -4,7 +4,7 @@ Reads from ../.env (project root) or environment variables.
 Always resolves storage paths to absolute based on this file's location.
 """
 from pathlib import Path
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Absolute path to the backend/ directory (where this config file lives)
 _BACKEND_DIR = Path(__file__).resolve().parent.parent
@@ -36,10 +36,11 @@ class Settings(BaseSettings):
     max_upload_size_mb: int = 500
     ssim_threshold: float = 0.95
 
-    class Config:
-        env_file = str(_BACKEND_DIR.parent / ".env")   # absolute path to root .env
-        env_file_encoding = "utf-8"
-        extra = "ignore"
+    model_config = SettingsConfigDict(
+        env_file=str(_BACKEND_DIR.parent / ".env"),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
 
 settings = Settings()

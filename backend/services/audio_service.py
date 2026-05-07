@@ -102,12 +102,25 @@ _whisper_model = None
 
 
 def _get_whisper_model():
-    """Lazy-load Whisper model (downloads ~150MB on first use)."""
+    """Lazy-load Whisper model. Uses local cache only to avoid HuggingFace network check."""
     global _whisper_model
     if _whisper_model is None and _WHISPER_OK:
         logger.info("whisper_loading", model="base", compute="int8")
-        _whisper_model = WhisperModel("base", device="cpu", compute_type="int8")
-        logger.info("whisper_loaded")
+        try:
+            # local_files_only=True — skip the HuggingFace revision check entirely.
+            # This prevents the worker from crashing when HF is slow/unreachable.
+            _whisper_model = WhisperModel(
+                "base",
+                device="cpu",
+                compute_type="int8",
+                local_files_only=True,
+            )
+            logger.info("whisper_loaded", source="local_cache")
+        except Exception:
+            # First run or cache missing — allow download
+            logger.info("whisper_downloading", msg="Model not cached yet, downloading ~150MB")
+            _whisper_model = WhisperModel("base", device="cpu", compute_type="int8")
+            logger.info("whisper_loaded", source="downloaded")
     return _whisper_model
 
 
