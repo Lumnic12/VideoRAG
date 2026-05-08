@@ -58,22 +58,21 @@ def _embed_dim() -> int:
 
 
 async def _embed_via_ollama(text: str) -> np.ndarray:
-    """Call Ollama /api/embeddings with nomic-embed-text."""
-    # Ollama base_url is like http://host.docker.internal:11434/v1 — strip /v1
+    """Call Ollama /api/embed with nomic-embed-text."""
     base = settings.ollama_base_url.rstrip("/")
     if base.endswith("/v1"):
         base = base[:-3]
-    url = f"{base}/api/embeddings"
+    url = f"{base}/api/embed"
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(url, json={"model": "nomic-embed-text", "prompt": text})
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(url, json={"model": "nomic-embed-text", "input": text})
             resp.raise_for_status()
             data = resp.json()
-            vec = np.array(data["embedding"], dtype="float32")
+            # /api/embed returns {"embeddings": [[...]]}
+            vec = np.array(data["embeddings"][0], dtype="float32")
             return vec
     except Exception as e:
         logger.warning("ollama_embed_error", error=str(e)[:120])
-        # Deterministic fallback
         rng = np.random.default_rng(abs(hash(text)) % (2**31))
         return rng.random(_EMBED_DIM_OLLAMA).astype("float32")
 
