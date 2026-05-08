@@ -325,36 +325,88 @@ export function Chat() {
     if (!overrideQuestion) setInput('')
 
     const userMsg: ChatMessage = { id: Date.now().toString(), role: 'user', content: question }
-    const loadingMsg: ChatMessage = {
-      id: Date.now().toString() + '_ai',
-      role: 'assistant',
-      content: '',
-      loading: true,
-    }
+    const aiId = Date.now().toString() + '_ai'
+    const loadingMsg: ChatMessage = { id: aiId, role: 'assistant', content: '', loading: true }
 
     const history = buildChatHistory()
     setMessages(prev => [...prev, userMsg, loadingMsg])
     setSendingMsg(true)
 
     try {
-      const result = await queryVideo({
+      const body = JSON.stringify({
         question,
         video_ids: activeVideoIds.length > 0 ? activeVideoIds : undefined,
         chat_history: history.length > 0 ? history : undefined,
       })
-      // Strip provider tag server-side before setting
-      const cleanAnswer = stripProviderTag(result.answer)
+
+      const resp = await fetch('/api/v1/query/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+      })
+
+      if (!resp.ok || !resp.body) throw new Error(`HTTP ${resp.status}`)
+
+      const reader = resp.body.getReader()
+      const decoder = new TextDecoder()
+      let accumulated = ''
+      let sources: QuerySource[] = []
+
+      // Switch from loading dots → empty text (streaming begins)
+      setMessages(prev => prev.map(m => m.id === aiId ? { ...m, loading: false, content: '' } : m))
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        const raw = decoder.decode(value, { stream: true })
+        // SSE lines: "data: <payload>\n\n"
+        const lines = raw.split('\n')
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          const payload = line.slice(6)
+
+          if (payload === '[DONE]') break
+
+          if (payload.startsWith('[SOURCES]')) {
+            try { sources = JSON.parse(payload.slice(9)) } catch { /* ignore */ }
+            continue
+          }
+
+          // Unescape newlines we encoded server-side
+          const token = payload.replace(/\\n/g, '\n')
+          accumulated += token
+
+          setMessages(prev => prev.map(m =>
+            m.id === aiId
+              ? { ...m, content: stripProviderTag(accumulated) }
+              : m
+          ))
+        }
+      }
+
+      // Final update with sources
       setMessages(prev => prev.map(m =>
-        m.loading
-          ? { ...m, loading: false, content: cleanAnswer, sources: result.sources }
-          : m
+        m.id === aiId ? { ...m, content: stripProviderTag(accumulated), sources } : m
       ))
+
     } catch (err: any) {
-      setMessages(prev => prev.map(m =>
-        m.loading
-          ? { ...m, loading: false, content: `⚠️ Error: ${err.message}` }
-          : m
-      ))
+      // Fallback: try non-streaming endpoint
+      try {
+        const result = await queryVideo({
+          question,
+          video_ids: activeVideoIds.length > 0 ? activeVideoIds : undefined,
+          chat_history: history.length > 0 ? history : undefined,
+        })
+        const cleanAnswer = stripProviderTag(result.answer)
+        setMessages(prev => prev.map(m =>
+          m.id === aiId ? { ...m, loading: false, content: cleanAnswer, sources: result.sources } : m
+        ))
+      } catch (err2: any) {
+        setMessages(prev => prev.map(m =>
+          m.id === aiId ? { ...m, loading: false, content: `⚠️ Error: ${err2.message}` } : m
+        ))
+      }
     } finally {
       setSendingMsg(false)
     }
