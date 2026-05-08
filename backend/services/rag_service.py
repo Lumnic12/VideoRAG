@@ -369,18 +369,17 @@ class RAGService:
                     transcript_segs=len(transcript),
                     structured_sections=len(structured))
 
-    async def _load_full_context(self, video_ids: list[str] | None) -> str:
+    async def _build_video_summary(self, video_ids: list[str] | None) -> str:
         """
-        Load the complete transcript + all keyframe OCR text from Redis
-        for the given video(s) and return as a formatted string to inject
-        directly into the LLM system prompt.
+        Build a compact video summary (~50 tokens) to give the LLM orientation.
+        This is NOT the full transcript — just enough to know what the video is about.
+        Proper RAG: FAISS retrieves the specific relevant content.
         """
         import redis as _redis_lib
         r = _redis_lib.from_url(settings.redis_url, decode_responses=True)
-        parts: list[str] = []
+        summaries: list[str] = []
 
-        keys = r.keys("job:*")
-        for key in keys:
+        for key in r.keys("job:*"):
             raw = r.get(key)
             if not raw:
                 continue
@@ -389,7 +388,6 @@ class RAGService:
             except Exception:
                 continue
 
-            # Extract video_id — stored as job_id (key without 'job:' prefix)
             jid = key.replace("job:", "")
             if video_ids and jid not in video_ids:
                 continue
@@ -397,108 +395,117 @@ class RAGService:
                 continue
 
             result = job.get("result") or {}
-
-            # ── Full audio transcript ──────────────────────────────────────────
-            transcript = result.get("transcript", [])
-            if transcript:
-                lines = []
-                for seg in transcript:
-                    t = seg.get("start", 0.0)
-                    mm, ss = int(t // 60), int(t % 60)
-                    lines.append(f"  [{mm}:{ss:02d}] {seg.get('text','').strip()}")
-                parts.append("=== FULL AUDIO TRANSCRIPT ===\n" + "\n".join(lines))
-
-            # ── All keyframe OCR text (timeline order) ─────────────────────────
+            filename = job.get("filename", "Unknown video")
             keyframes = result.get("keyframes", [])
-            kf_lines = []
-            for kf in sorted(keyframes, key=lambda x: x.get("timestamp", 0)):
-                ts = kf.get("timestamp", 0.0)
-                mm, ss = int(ts // 60), int(ts % 60)
-                title = (kf.get("slide_title") or "").strip()
-                text  = (kf.get("extracted_text") or "").strip()
-                if title or text:
-                    kf_lines.append(f"  [{mm}:{ss:02d}] {title}: {text}" if title else f"  [{mm}:{ss:02d}] {text}")
-            if kf_lines:
-                parts.append("=== KEYFRAME OCR TEXT (slide content) ===\n" + "\n".join(kf_lines))
-
-            # ── Structured transcript sections ─────────────────────────────────
+            transcript = result.get("transcript", [])
             structured = result.get("structured_transcript", [])
-            if structured:
-                sec_lines = []
-                for sec in structured:
-                    ts = sec.get("start", 0.0)
-                    mm, ss = int(ts // 60), int(ts % 60)
-                    topic = (sec.get("topic") or "").strip()
-                    summary = (sec.get("summary") or "").strip()
-                    if topic or summary:
-                        sec_lines.append(f"  [{mm}:{ss:02d}] {topic}: {summary}")
-                if sec_lines:
-                    parts.append("=== STRUCTURED SECTIONS ===\n" + "\n".join(sec_lines))
 
-        return "\n\n".join(parts)
+            # Duration estimate from last transcript segment
+            duration_str = ""
+            if transcript:
+                last_t = max((s.get("end", 0) for s in transcript), default=0)
+                mm, ss = int(last_t // 60), int(last_t % 60)
+                duration_str = f", ~{mm}m{ss:02d}s"
+
+            # Topics from structured sections
+            topics = [sec.get("topic", "") for sec in structured if sec.get("topic")]
+            topic_str = "; ".join(topics[:5]) if topics else "(topics not extracted)"
+
+            line = (
+                f"Video: {filename}{duration_str} "
+                f"| {len(keyframes)} keyframes | {len(transcript)} transcript segments\n"
+                f"Topics covered: {topic_str}"
+            )
+            summaries.append(line)
+
+        return "\n".join(summaries)
 
     async def query_and_answer(
         self,
         question: str,
         video_ids: list[str] | None = None,
-        top_k: int = 5,
+        top_k: int = 10,
         chat_history: list[dict] | None = None,
     ) -> dict:
         """
-        Retrieve top-k relevant chunks + inject full transcript/OCR context,
-        synthesise answer via LLM. Supports multi-turn conversation.
+        RAG query:
+        1. FAISS retrieves top-k most relevant chunks (primary source)
+        2. A compact video summary (filename, duration, topics) is always prepended
+        3. If retrieval confidence is low, a small fallback excerpt is added
+        The LLM never receives the raw full transcript — that would defeat RAG.
         """
         self._load()
         sources = await self._retrieve(question, video_ids, top_k)
 
-        # Always load the full video context (transcript + OCR) from Redis
-        # This is injected DIRECTLY into the system prompt so the LLM never
-        # loses context even when FAISS vector retrieval misses something.
-        full_context = await self._load_full_context(video_ids)
-
-        if not sources and not full_context:
+        if not sources:
             return {
                 "answer": "No relevant content found. Upload and process a video first.",
                 "sources": [],
             }
 
+        # ── Compact video summary (orientation, ~50 tokens, always injected) ───
+        video_summary = await self._build_video_summary(video_ids)
 
+        # ── RAG retrieved chunks (the actual content) ─────────────────────────
+        rag_context = "\n\n".join(
+            f"[{s['type']} @ {s['timestamp']:.1f}s] {s['text']}"
+            for s in sources
+        )
+
+        # ── Low-confidence fallback (only when top score < 0.3) ───────────────
+        # This handles the edge case where the question is phrased very differently
+        # from how the content is indexed (e.g., broad summary questions)
+        top_score = sources[0].get("score", 1.0) if sources else 0.0
+        fallback_excerpt = ""
+        if top_score < 0.3:
+            # Retrieve broader context: top transcript segments (not full text)
+            import redis as _redis_lib
+            r2 = _redis_lib.from_url(settings.redis_url, decode_responses=True)
+            for key in r2.keys("job:*"):
+                raw = r2.get(key)
+                if not raw:
+                    continue
+                try:
+                    job = json.loads(raw)
+                except Exception:
+                    continue
+                jid = key.replace("job:", "")
+                if video_ids and jid not in video_ids:
+                    continue
+                if job.get("status") != "done":
+                    continue
+                result = job.get("result") or {}
+                segs = result.get("transcript", [])
+                if segs:
+                    # First 500 chars of transcript as orientation
+                    joined = " ".join(s.get("text", "") for s in segs[:10])
+                    fallback_excerpt = f"\n\n[Transcript excerpt] {joined[:500]}"
+                break
 
         clients = self._get_chat_clients()
         if not clients:
             answer = (
                 "(LLM stub — configure OLLAMA_BASE_URL or an API key in .env)\n\n"
-                f"Top RAG source: {sources[0]['text'][:300] if sources else full_context[:300]}"
+                f"Top RAG source: {sources[0]['text'][:300]}"
             )
         else:
-            # Build context block: full video content FIRST, then FAISS top-K
-            rag_chunk_text = "\n\n".join(
-                f"[{s['type']} @ {s['timestamp']:.1f}s] {s['text']}"
-                for s in sources
+            system_content = (
+                "You are an expert tutor and study assistant analyzing video/lecture content.\n"
+                "You have retrieved the most semantically relevant segments from the video using vector search.\n"
+                "When answering:\n"
+                "- Base answers ONLY on the provided context chunks below — do not hallucinate.\n"
+                "- Cite timestamps (e.g., '@2:30') when referencing specific content.\n"
+                "- For follow-up questions, use conversation history to maintain context.\n"
+                "- If context is insufficient for the question, say so explicitly.\n"
+                "- Use markdown: **bold**, `code`, bullet points.\n\n"
             )
+            if video_summary:
+                system_content += f"=== VIDEO INFO ===\n{video_summary}\n\n"
+            system_content += f"=== RETRIEVED CONTEXT (top {len(sources)} chunks) ===\n{rag_context}"
+            if fallback_excerpt:
+                system_content += fallback_excerpt
 
-            # Combine: full transcript/OCR (ground truth) + FAISS retrieved chunks
-            combined_context = ""
-            if full_context:
-                combined_context += full_context
-            if rag_chunk_text:
-                combined_context += "\n\n=== MOST RELEVANT SEGMENTS (vector search) ===\n" + rag_chunk_text
-
-            system_msg = {
-                "role": "system",
-                "content": (
-                    "You are an expert tutor and study assistant analyzing video/lecture content.\n"
-                    "You have the COMPLETE audio transcript, all slide OCR text, and the most relevant segments retrieved by semantic search.\n"
-                    "When answering:\n"
-                    "- Base your answers ONLY on the provided video context below.\n"
-                    "- DO NOT hallucinate or speculate beyond what is in the context.\n"
-                    "- Cite specific timestamps (e.g., '@2:30') when referencing content.\n"
-                    "- If asked to summarize or explain, use the full transcript — not just the top search results.\n"
-                    "- For follow-up questions, reference your prior answers and the conversation history.\n"
-                    "- Use markdown formatting: **bold**, `code`, bullet points, etc.\n\n"
-                    f"{combined_context}"
-                ),
-            }
+            system_msg = {"role": "system", "content": system_content}
 
             # Build multi-turn messages array
             messages = [system_msg]
