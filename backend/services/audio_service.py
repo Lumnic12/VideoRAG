@@ -14,7 +14,9 @@ Graceful stubs:
 from __future__ import annotations
 
 import asyncio
+import json
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -98,91 +100,59 @@ def extract_audio(video_path: str, output_dir: str) -> str | None:
 
 # ── Whisper Local Transcription ───────────────────────────────────────────────
 
-_whisper_model = None
+_WHISPER_SCRIPT = """
+import json, sys
+try:
+    from faster_whisper import WhisperModel
+    path = sys.argv[1]
+    try:
+        m = WhisperModel("base", device="cpu", compute_type="int8", local_files_only=True)
+    except Exception:
+        m = WhisperModel("base", device="cpu", compute_type="int8")
+    segs, info = m.transcribe(path, beam_size=3, language=None, vad_filter=True,
+        vad_parameters=dict(min_silence_duration_ms=500, speech_pad_ms=200))
+    out = [{"start": round(s.start,2), "end": round(s.end,2), "text": s.text.strip()} for s in segs]
+    print(json.dumps({"ok": True, "lang": info.language, "segs": out}))
+except Exception as e:
+    print(json.dumps({"ok": False, "err": str(e)}))
+"""
 
 
-def _get_whisper_model():
-    """Lazy-load Whisper model. Uses GPU (CUDA) if available, else CPU int8."""
-    global _whisper_model
-    if _whisper_model is None and _WHISPER_OK:
-        # Auto-detect CUDA GPU
-        try:
-            import ctranslate2
-            providers = ctranslate2.get_supported_compute_types("cuda")
-            use_cuda = len(providers) > 0
-        except Exception:
-            use_cuda = False
-
-        device = "cuda" if use_cuda else "cpu"
-        compute = "float16" if use_cuda else "int8"
-        logger.info("whisper_loading", model="base", device=device, compute=compute)
-
-        try:
-            _whisper_model = WhisperModel(
-                "base",
-                device=device,
-                compute_type=compute,
-                local_files_only=True,
-            )
-            logger.info("whisper_loaded", device=device, source="local_cache")
-        except Exception:
-            # Cache miss or CUDA fail — retry with CPU or allow download
-            logger.info("whisper_fallback", reason="local load failed, retrying")
-            _whisper_model = WhisperModel("base", device="cpu", compute_type="int8")
-            logger.info("whisper_loaded", device="cpu", source="downloaded")
-    return _whisper_model
-# NOTE: Whisper loads lazily on first transcription call (inside a task thread).
-# Loading at import time crashes Celery on Windows — ctranslate2 native DLL
-# cannot be safely initialised in the Celery main process before threading starts.
+def _transcribe_whisper_sync(audio_path: str) -> list[TranscriptSegment]:
+    """Run Whisper in a blocking subprocess to isolate DLL conflicts."""
+    import subprocess as _sp
+    try:
+        r = _sp.run(
+            [sys.executable, "-c", _WHISPER_SCRIPT, audio_path],
+            capture_output=True, text=True, timeout=300,
+        )
+        for line in reversed(r.stdout.strip().split("\n")):
+            try:
+                data = json.loads(line)
+                if data.get("ok"):
+                    return [TranscriptSegment(**s) for s in data.get("segs", [])]
+                logger.error("whisper_err", err=data.get("err", "")[:300])
+                return []
+            except Exception:
+                continue
+        logger.error("whisper_no_output", stderr=r.stderr[:300])
+        return []
+    except _sp.TimeoutExpired:
+        logger.warning("whisper_timeout")
+        return []
+    except Exception as e:
+        logger.error("whisper_sync_error", error=str(e)[:200])
+        return []
 
 
 async def _transcribe_via_whisper(audio_path: str) -> list[TranscriptSegment]:
-    """
-    Transcribe audio using local faster-whisper model.
-    Runs in a thread to avoid blocking the event loop.
-    """
-    model = _get_whisper_model()
-    if model is None:
+    """Async wrapper — runs blocking subprocess in a thread pool."""
+    if not _WHISPER_OK:
         return []
-
-    def _run():
-        segments_out = []
-        segments, info = model.transcribe(
-            audio_path,
-            beam_size=5,
-            language=None,  # auto-detect
-            vad_filter=True,  # skip silence
-            vad_parameters=dict(
-                min_silence_duration_ms=500,
-                speech_pad_ms=200,
-            ),
-        )
-        logger.info("whisper_transcribing", language=info.language,
-                     language_prob=round(info.language_probability, 2))
-
-        for segment in segments:
-            segments_out.append(TranscriptSegment(
-                start=round(segment.start, 2),
-                end=round(segment.end, 2),
-                text=segment.text.strip(),
-            ))
-
-        return segments_out
-
-    try:
-        # 5-minute hard timeout — Whisper on CPU for long videos can be slow
-        result = await asyncio.wait_for(
-            asyncio.to_thread(_run),
-            timeout=300.0,
-        )
-        logger.info("whisper_transcription_complete", segments=len(result))
-        return result
-    except asyncio.TimeoutError:
-        logger.warning("whisper_timeout", msg="Transcription exceeded 5 min — returning empty")
-        return []
-    except Exception as e:
-        logger.error("whisper_transcription_error", error=str(e)[:200])
-        return []
+    logger.info("whisper_start", audio=Path(audio_path).name)
+    result = await asyncio.to_thread(_transcribe_whisper_sync, audio_path)
+    logger.info("whisper_done", segments=len(result))
+    return result
 
 
 # ── Deepgram Transcription ────────────────────────────────────────────────────
