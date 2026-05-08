@@ -12,7 +12,7 @@ start "SVS Backend" cmd /k "cd /d %~dp0backend && .venv\Scripts\uvicorn.exe main
 timeout /t 5 /nobreak > nul
 
 echo [2/3] Starting Celery Worker...
-start "SVS Celery" cmd /k "cd /d %~dp0backend && .venv\Scripts\celery.exe -A services.task_orchestrator.celery_app worker --pool=solo --loglevel=info"
+start "SVS Celery" cmd /k "cd /d %~dp0backend && python start_celery.py -A services.task_orchestrator.celery_app worker --pool=threads --concurrency=2 --loglevel=info"
 
 :: Wait for Celery to start
 timeout /t 3 /nobreak > nul

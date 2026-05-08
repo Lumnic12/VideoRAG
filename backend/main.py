@@ -4,6 +4,20 @@ Phase 1: Core pipeline with pydantic-settings + structlog + lifespan
 """
 from __future__ import annotations
 
+# ── WMI Hang Bypass ───────────────────────────────────────────────────────────
+# Python 3.14 platform.system() hangs on Windows when WMI service is stuck.
+# We patch it early to return 'Windows' instantly and prevent celery/uvicorn hang.
+import platform
+import collections
+platform.system = lambda: "Windows"
+platform.machine = lambda: "AMD64"
+platform.release = lambda: "10"
+platform.version = lambda: "10.0.19041"
+_Uname = collections.namedtuple("uname_result", ["system", "node", "release", "version", "machine", "processor"])
+platform.uname = lambda: _Uname("Windows", "DESKTOP", "10", "10.0.19041", "AMD64", "AMD64")
+platform.win32_ver = lambda *a, **k: ("10", "10.0.19041", "SP0", "Multiprocessor Free")
+# ──────────────────────────────────────────────────────────────────────────────
+
 from contextlib import asynccontextmanager
 from pathlib import Path
 
